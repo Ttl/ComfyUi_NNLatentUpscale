@@ -65,5 +65,7 @@ class NNLatentUpscale:
         if self.dtype != torch.float32:
             latent_out = latent_out.to(dtype=torch.float32)
 
+        latent_out = latent_out.to(device="cpu")
+
         self.model.to(device=model_management.vae_offload_device())
         return ({"samples": latent_out},)
