@@ -9,24 +9,11 @@ from pathlib import Path
 from PIL import Image
 import numpy as np
 
-def to_tensor(img):
-    img = np.transpose(img, (2,0,1))
-    img = torch.tensor(img).to(dtype=torch.float)
-    img = img.to(torch.float) / 127.5 - 1
-    img = torch.unsqueeze(img, 0)
-    return img
-
-def from_tensor(img):
-    img = torch.squeeze(img)
-    img = (img + 1) * 127.5
-    img = img.clamp(0, 255)
-    img = img.cpu().numpy()
-    img = np.transpose(img, (1,2,0))
-    return img
 
 def psnr(x, ref, maxg=2):
     mse = torch.mean(torch.square(x - ref))
-    return 20*torch.log10(maxg/torch.sqrt(mse))
+    return 20 * torch.log10(maxg / torch.sqrt(mse))
+
 
 class ImageDataset(torch.utils.data.Dataset):
     def __init__(self, path, size):
@@ -38,7 +25,9 @@ class ImageDataset(torch.utils.data.Dataset):
 
         self.image_transforms = transforms.Compose(
             [
-                transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR),
+                transforms.Resize(
+                    size, interpolation=transforms.InterpolationMode.BILINEAR
+                ),
                 transforms.CenterCrop(size),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
@@ -54,10 +43,12 @@ class ImageDataset(torch.utils.data.Dataset):
         image = self.image_transforms(image)
         return image
 
+
 def collate_fn(images):
     images = torch.stack(images)
     images = images.to(memory_format=torch.contiguous_format).float()
     return images
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Latent resizer evaluation")
@@ -132,12 +123,12 @@ if __name__ == "__main__":
     resizer = LatentResizer.load_model(args.resizer_path, device, dtype)
 
     # LPIPS is always in float32 because of nans in float16
-    lpips_fn = lpips.LPIPS(net='vgg').to(device=device, dtype=torch.float32)
+    lpips_fn = lpips.LPIPS(net="vgg").to(device=device, dtype=torch.float32)
 
     dataset = ImageDataset(args.test_path, args.resolution)
-    dataloader = torch.utils.data.DataLoader(dataset,
-                            batch_size=args.batch_size,
-                            num_workers=args.num_workers)
+    dataloader = torch.utils.data.DataLoader(
+        dataset, batch_size=args.batch_size, num_workers=args.num_workers
+    )
 
     elapsed_vae_list = []
     elapsed_resizer_list = []
@@ -159,7 +150,9 @@ if __name__ == "__main__":
         with torch.inference_mode():
             for images in dataloader:
                 images = images.to(device=device, dtype=dtype)
-                images_upscaled = torch.nn.functional.interpolate(images, scale_factor=args.scale, mode="bilinear")
+                images_upscaled = torch.nn.functional.interpolate(
+                    images, scale_factor=args.scale, mode="bilinear"
+                )
                 latents = vae.encode(images).latent_dist.sample()
                 del images
 
@@ -167,7 +160,9 @@ if __name__ == "__main__":
                 start_resizer = torch.cuda.Event(enable_timing=True)
                 end_resizer = torch.cuda.Event(enable_timing=True)
                 start_resizer.record()
-                resized = resizer(scale_factor * latents, scale=args.scale) / scale_factor
+                resized = (
+                    resizer(scale_factor * latents, scale=args.scale) / scale_factor
+                )
                 end_resizer.record()
                 torch.cuda.synchronize()
                 resizer_elapsed = start_resizer.elapsed_time(end_resizer)
@@ -178,7 +173,9 @@ if __name__ == "__main__":
                 # VAE decode -> upscale -> encode
                 start_vae.record()
                 decoded_img = vae.decode(latents)[0]
-                img_upscaled = torch.nn.functional.interpolate(decoded_img, scale_factor=args.scale, mode="bilinear")
+                img_upscaled = torch.nn.functional.interpolate(
+                    decoded_img, scale_factor=args.scale, mode="bilinear"
+                )
                 vae_encoded = vae.encode(img_upscaled).latent_dist.sample()
                 end_vae.record()
                 torch.cuda.synchronize()
@@ -188,12 +185,14 @@ if __name__ == "__main__":
                 start_latent = torch.cuda.Event(enable_timing=True)
                 end_latent = torch.cuda.Event(enable_timing=True)
                 start_latent.record()
-                resized_latent = torch.nn.functional.interpolate(latents, scale_factor=args.scale, mode="bilinear")
+                resized_latent = torch.nn.functional.interpolate(
+                    latents, scale_factor=args.scale, mode="bilinear"
+                )
                 end_latent.record()
                 torch.cuda.synchronize()
                 latent_elapsed = start_latent.elapsed_time(end_latent)
 
-                print('Elapsed (ms)', vae_elapsed, resizer_elapsed, latent_elapsed)
+                print("Elapsed (ms)", vae_elapsed, resizer_elapsed, latent_elapsed)
 
                 elapsed_vae_list.append(vae_elapsed)
                 elapsed_resizer_list.append(resizer_elapsed)
@@ -205,15 +204,21 @@ if __name__ == "__main__":
                 decoded_vae = vae.decode(vae_encoded)[0]
                 decoded_latent = vae.decode(resized_latent)[0]
 
-                mse_resizer = torch.nn.functional.mse_loss(decoded_resized, images_upscaled)
+                mse_resizer = torch.nn.functional.mse_loss(
+                    decoded_resized, images_upscaled
+                )
                 mse_vae = torch.nn.functional.mse_loss(decoded_vae, images_upscaled)
-                mse_latent = torch.nn.functional.mse_loss(decoded_latent, images_upscaled)
+                mse_latent = torch.nn.functional.mse_loss(
+                    decoded_latent, images_upscaled
+                )
 
                 mse_vae_list.extend(mse_vae.cpu().numpy().flatten())
                 mse_resizer_list.extend(mse_resizer.cpu().numpy().flatten())
                 mse_latent_list.extend(mse_latent.cpu().numpy().flatten())
 
-                lpips_resizer = lpips_fn(decoded_resized.float(), images_upscaled.float())
+                lpips_resizer = lpips_fn(
+                    decoded_resized.float(), images_upscaled.float()
+                )
                 lpips_vae = lpips_fn(decoded_vae.float(), images_upscaled.float())
                 lpips_latent = lpips_fn(decoded_latent.float(), images_upscaled.float())
 
@@ -229,19 +234,19 @@ if __name__ == "__main__":
                 psnr_resizer_list.extend(psnr_resized.cpu().numpy().flatten())
                 psnr_latent_list.extend(psnr_latent.cpu().numpy().flatten())
     finally:
-        print('Batch size', args.batch_size)
-        print('Elapsed VAE', np.mean(elapsed_vae_list), 'ms')
-        print('Elapsed resizer', np.mean(elapsed_resizer_list), 'ms')
-        print('Elapsed latent upscale', np.mean(elapsed_latent_list), 'ms')
+        print("Batch size", args.batch_size)
+        print("Elapsed VAE", np.mean(elapsed_vae_list), "ms")
+        print("Elapsed resizer", np.mean(elapsed_resizer_list), "ms")
+        print("Elapsed latent upscale", np.mean(elapsed_latent_list), "ms")
 
-        print('MSE VAE', np.mean(mse_vae_list))
-        print('MSE resizer', np.mean(mse_resizer_list))
-        print('MSE latent upscale', np.mean(mse_latent_list))
+        print("MSE VAE", np.mean(mse_vae_list))
+        print("MSE resizer", np.mean(mse_resizer_list))
+        print("MSE latent upscale", np.mean(mse_latent_list))
 
-        print('LPIPS VAE', np.mean(lpips_vae_list))
-        print('LPIPS resizer', np.mean(lpips_resizer_list))
-        print('LPIPS latent upscale', np.mean(lpips_latent_list))
+        print("LPIPS VAE", np.mean(lpips_vae_list))
+        print("LPIPS resizer", np.mean(lpips_resizer_list))
+        print("LPIPS latent upscale", np.mean(lpips_latent_list))
 
-        print('PSNR VAE', np.mean(psnr_vae_list))
-        print('PSNR resizer', np.mean(psnr_resizer_list))
-        print('PSNR latent', np.mean(psnr_latent_list))
+        print("PSNR VAE", np.mean(psnr_vae_list))
+        print("PSNR resizer", np.mean(psnr_resizer_list))
+        print("PSNR latent", np.mean(psnr_latent_list))
