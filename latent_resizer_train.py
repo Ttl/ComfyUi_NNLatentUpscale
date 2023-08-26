@@ -302,6 +302,8 @@ if __name__ == "__main__":
     while step < args.steps:
         epoch += 1
         for batch in train_dataloader:
+            if batch["img_input"].shape == batch["img_target"].shape:
+                continue
             step += 1
             loss, logs = train_fn(batch)
             l = loss.detach().cpu().item()
