@@ -4,13 +4,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
+
 def normalization(channels):
     return nn.GroupNorm(32, channels)
+
 
 def zero_module(module):
     for p in module.parameters():
         p.detach().zero_()
     return module
+
 
 class AttnBlock(nn.Module):
     def __init__(self, in_channels):
@@ -18,15 +21,9 @@ class AttnBlock(nn.Module):
         self.in_channels = in_channels
 
         self.norm = normalization(in_channels)
-        self.q = nn.Conv2d(
-            in_channels, in_channels, kernel_size=1, stride=1, padding=0
-        )
-        self.k = nn.Conv2d(
-            in_channels, in_channels, kernel_size=1, stride=1, padding=0
-        )
-        self.v = nn.Conv2d(
-            in_channels, in_channels, kernel_size=1, stride=1, padding=0
-        )
+        self.q = nn.Conv2d(in_channels, in_channels, kernel_size=1, stride=1, padding=0)
+        self.k = nn.Conv2d(in_channels, in_channels, kernel_size=1, stride=1, padding=0)
+        self.v = nn.Conv2d(in_channels, in_channels, kernel_size=1, stride=1, padding=0)
         self.proj_out = nn.Conv2d(
             in_channels, in_channels, kernel_size=1, stride=1, padding=0
         )
@@ -53,8 +50,10 @@ class AttnBlock(nn.Module):
         h_ = self.proj_out(h_)
         return x + h_
 
+
 def make_attn(in_channels, attn_kwargs=None):
     return AttnBlock(in_channels)
+
 
 class ResBlockEmb(nn.Module):
     def __init__(
@@ -148,21 +147,19 @@ class ResBlockEmb(nn.Module):
             h = self.out_layers(h)
         return self.skip_connection(x) + h
 
+
 class LatentResizer(nn.Module):
     def __init__(self, in_blocks=10, out_blocks=10, channels=128, dropout=0, attn=True):
         super().__init__()
-        self.conv_in = nn.Conv2d(4,
-                    channels,
-                    3,
-                    padding=1)
+        self.conv_in = nn.Conv2d(4, channels, 3, padding=1)
 
         self.channels = channels
         embed_dim = 32
         self.embed = nn.Sequential(
-                        nn.Linear(1, embed_dim),
-                        nn.SiLU(),
-                        nn.Linear(embed_dim, embed_dim),
-                    )
+            nn.Linear(1, embed_dim),
+            nn.SiLU(),
+            nn.Linear(embed_dim, embed_dim),
+        )
 
         self.in_blocks = nn.ModuleList([])
         for b in range(in_blocks):
@@ -180,15 +177,15 @@ class LatentResizer(nn.Module):
         self.conv_out = nn.Conv2d(channels, 4, 3, padding=1)
 
     @classmethod
-    def load_model(cls, filename, device="cuda", dtype=torch.float32):
+    def load_model(cls, filename, device="cuda", dtype=torch.float32, dropout=0):
         weights = torch.load(filename, map_location=device)
         in_blocks = 0
         out_blocks = 0
         in_tfs = 0
         out_tfs = 0
-        channels = weights['conv_in.bias'].shape[0]
+        channels = weights["conv_in.bias"].shape[0]
         for k in weights.keys():
-            k = k.split('.')
+            k = k.split(".")
             if k[0] == "in_blocks":
                 in_blocks = max(in_blocks, int(k[1]))
                 if k[2] == "q" and k[3] == "weight":
@@ -199,7 +196,13 @@ class LatentResizer(nn.Module):
                     out_tfs += 1
         in_blocks = in_blocks + 1 - in_tfs
         out_blocks = out_blocks + 1 - out_tfs
-        resizer = cls(in_blocks=in_blocks, out_blocks=out_blocks, channels=channels, attn=(out_tfs != 0))
+        resizer = cls(
+            in_blocks=in_blocks,
+            out_blocks=out_blocks,
+            channels=channels,
+            dropout=dropout,
+            attn=(out_tfs != 0),
+        )
         resizer.load_state_dict(weights)
         resizer.eval()
         resizer.to(device, dtype=dtype)
