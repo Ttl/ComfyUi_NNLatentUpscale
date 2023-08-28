@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
-from comfy.utils import load_torch_file
 
 
 def normalization(channels):
@@ -179,7 +178,10 @@ class LatentResizer(nn.Module):
 
     @classmethod
     def load_model(cls, filename, device="cpu", dtype=torch.float32, dropout=0):
-        weights = load_torch_file(filename, safe_load=True)
+        if not 'weights_only' in torch.load.__code__.co_varnames:
+            weights = torch.load(filename, map_location=torch.device("cpu"))
+        else:
+            weights = torch.load(filename, map_location=torch.device("cpu"), weights_only=True)
         in_blocks = 0
         out_blocks = 0
         in_tfs = 0
