@@ -15,7 +15,6 @@ class NNLatentUpscale:
         self.dtype = torch.float32
         if model_management.should_use_fp16():
             self.dtype = torch.float16
-        device = model_management.get_torch_device()
         self.weight_path = {
             "SDXL": os.path.join(self.local_dir, "sdxl_resizer.pt"),
             "SD 1.x": os.path.join(self.local_dir, "sd15_resizer.pt"),

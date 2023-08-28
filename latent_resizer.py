@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
+from comfy.utils import load_torch_file
 
 
 def normalization(channels):
@@ -177,8 +178,8 @@ class LatentResizer(nn.Module):
         self.conv_out = nn.Conv2d(channels, 4, 3, padding=1)
 
     @classmethod
-    def load_model(cls, filename, device="cuda", dtype=torch.float32, dropout=0):
-        weights = torch.load(filename, map_location=device)
+    def load_model(cls, filename, device="cpu", dtype=torch.float32, dropout=0):
+        weights = load_torch_file(filename, safe_load=True)
         in_blocks = 0
         out_blocks = 0
         in_tfs = 0
