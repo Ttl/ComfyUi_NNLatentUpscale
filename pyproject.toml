@@ -1,0 +1,14 @@
+[project]
+name = "comfyui_nnlatentupscale"
+description = "Nodes:NNLatentUpscale, A custom ComfyUI node designed for rapid latent upscaling using a compact neural network, eliminating the need for VAE-based decoding and encoding."
+version = "1.0.0"
+license = "LICENSE"
+
+[project.urls]
+Repository = "https://github.com/Ttl/ComfyUi_NNLatentUpscale"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "ComfyUi_NNLatentUpscale"
+Icon = ""
