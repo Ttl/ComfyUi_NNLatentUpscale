@@ -1,21 +1,24 @@
-import torch
-from .latent_resizer import LatentResizer
-from comfy import model_management
 import os
+
+import torch
+from comfy import model_management
+
+from .latent_resizer import LatentResizer
 
 
 class NNLatentUpscale:
     """
-    Upscales SDXL latent using neural network
+    Upscales SDXL/Flux latent using neural network
     """
 
     def __init__(self):
         self.local_dir = os.path.dirname(os.path.realpath(__file__))
-        self.scale_factor = 0.13025
+        self.scale_factor = {"SDXL": 0.13025, "SD 1.x": 0.13025, "Flux1.D": 0.3611}
         self.dtype = torch.float32
         if model_management.should_use_fp16():
             self.dtype = torch.float16
         self.weight_path = {
+            "Flux1.D": os.path.join(self.local_dir, "flux_resizer.pt"),
             "SDXL": os.path.join(self.local_dir, "sdxl_resizer.pt"),
             "SD 1.x": os.path.join(self.local_dir, "sd15_resizer.pt"),
         }
@@ -26,7 +29,7 @@ class NNLatentUpscale:
         return {
             "required": {
                 "latent": ("LATENT",),
-                "version": (["SDXL", "SD 1.x"],),
+                "version": (["Flux1.D", "SDXL", "SD 1.x"],),
                 "upscale": (
                     "FLOAT",
                     {
@@ -57,9 +60,8 @@ class NNLatentUpscale:
             self.version = version
 
         self.model.to(device=device)
-        latent_out = (
-            self.model(self.scale_factor * samples, scale=upscale) / self.scale_factor
-        )
+        scale_factor = self.scale_factor[version]
+        latent_out = self.model(scale_factor * samples, scale=upscale) / scale_factor
 
         if self.dtype != torch.float32:
             latent_out = latent_out.to(dtype=torch.float32)

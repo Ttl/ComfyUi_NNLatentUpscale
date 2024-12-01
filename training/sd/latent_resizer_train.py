@@ -1,22 +1,22 @@
 #!/usr/bin/env python
+import argparse
+import io
+import os
+import random
+from collections import defaultdict
+
+import lpips
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from torch.utils.data import Dataset
-from torch.utils.tensorboard import SummaryWriter
-from diffusers import AutoencoderKL
-import argparse
-import os
-import random
 import webdataset as wds
-import io
-from tqdm.auto import tqdm
+from diffusers import AutoencoderKL
 from latent_resizer import LatentResizer
-import lpips
-from collections import defaultdict
 from PIL import Image
+from torch.utils.data import DataLoader, Dataset
+from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
+from tqdm.auto import tqdm
 
 
 def init_dataset(dataset_path, size=512):
@@ -260,7 +260,7 @@ if __name__ == "__main__":
             dtype=torch.float32,
         )
     else:
-        model = LatentResizer(dropout=args.dropout).to(args.device)
+        model = LatentResizer(dropout=args.dropout, latent_channels=4).to(args.device)
 
     train_dataset = init_dataset(args.train_path, size=args.resolution)
     train_dataloader = DataLoader(

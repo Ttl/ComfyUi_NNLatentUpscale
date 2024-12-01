@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "comfyui-nnlatentupscaleflux"
+version = "0.1.0"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.12"
+diffusers = "^0.31.0"
+webdataset = "^0.2.100"
+tqdm = "^4.67.1"
+lpips = "^0.1.4"
+pillow = "^11.0.0"
+pytorch-msssim = "^1.0.0"
+einops = "^0.8.0"
+tensorboard = "^2.18.0"
+safetensors = "^0.4.5"
+accelerate = "^1.1.1"
+
+
+[tool.poetry.group.dev.dependencies]
+mypy = "^1.13.0"
+black = "^24.10.0"
+isort = "^5.13.2"
+pyright = "^1.1.389"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

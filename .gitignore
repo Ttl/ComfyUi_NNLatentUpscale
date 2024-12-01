@@ -1,0 +1,4 @@
+data/
+runs/
+__pycache__
+.mypy_cache

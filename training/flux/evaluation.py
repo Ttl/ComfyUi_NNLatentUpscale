@@ -1,15 +1,16 @@
 #!/usr/bin/env python
-from latent_resizer import LatentResizer
 import argparse
-from diffusers import AutoencoderKL
-import lpips
-import torch
-from torchvision import transforms
 from pathlib import Path
-from PIL import Image
+
+import lpips
 import numpy as np
-from tqdm import tqdm
+import torch
+from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
+from latent_resizer import LatentResizer
+from PIL import Image
 from pytorch_msssim import ssim
+from torchvision import transforms
+from tqdm import tqdm
 
 
 def psnr(x, ref, maxg=2):
@@ -117,14 +118,14 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     device = torch.device(args.device)
-    scale_factor = 0.13025
+    scale_factor = 0.3611
 
     if args.fp16:
         dtype = torch.float16
     else:
         dtype = torch.float32
 
-    vae = AutoencoderKL.from_single_file(args.vae_path).to(device, dtype=dtype)
+    vae = AutoencoderKL.from_pretrained(args.vae_path).to(device, dtype=dtype)
     vae.eval()
 
     resizer = LatentResizer.load_model(args.resizer_path, device, dtype)
