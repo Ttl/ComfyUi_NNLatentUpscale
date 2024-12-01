@@ -114,6 +114,15 @@ if __name__ == "__main__":
         action="store_true",
         help="Only evaluate resizer",
     )
+    parser.add_argument(
+        "--target",
+        choices=["lowres", "highres"],
+        default="highres",
+        help="Reference picture. 'lowres': original picture is "
+        "passed to resizer and the output is compared against linearly interpolated image. "
+        "'highres': Downscaled image is passed to resizer and output is compared "
+        "against the original picture.",
+    )
 
     args = parser.parse_args()
     device = torch.device(args.device)
@@ -123,6 +132,11 @@ if __name__ == "__main__":
         dtype = torch.float16
     else:
         dtype = torch.float32
+
+    if args.target == "highres":
+        # Resolution is the input image resolution.
+        args.resolution = int(round(args.resolution * args.scale))
+        args.resolution -= args.resolution % 8
 
     vae = AutoencoderKL.from_single_file(args.vae_path).to(device, dtype=dtype)
     vae.eval()
@@ -161,9 +175,19 @@ if __name__ == "__main__":
         with torch.inference_mode():
             for images in tqdm(dataloader):
                 images = images.to(device=device, dtype=dtype)
-                images_upscaled = torch.nn.functional.interpolate(
-                    images, scale_factor=args.scale, mode="bilinear"
-                )
+                if args.target == "lowres":
+                    images_upscaled = torch.nn.functional.interpolate(
+                        images, scale_factor=args.scale, mode="bilinear"
+                    )
+                elif args.target == "highres":
+                    images_downscaled = torch.nn.functional.interpolate(
+                        images, scale_factor=1/args.scale, mode="bilinear"
+                    )
+                    images_upscaled = images
+                    images = images_downscaled
+                else:
+                    raise ValueError("Unknown target")
+
                 latents = vae.encode(images).latent_dist.sample()
                 del images
 

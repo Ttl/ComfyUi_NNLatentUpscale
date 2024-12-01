@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
-from diffusers import AutoencoderKL
+from diffusers import AutoencoderKL, AutoencoderTiny
 import argparse
 import os
 import random
@@ -31,7 +31,7 @@ def init_dataset(dataset_path, size=512):
     print(f"{len(shards)} shards")
 
     def preprocess(sample):
-        k = [k for k in sample.keys() if k in ["jpg", "png"]]
+        k = [k for k in sample.keys() if k in ["jpg", "png", "image"]]
         if len(k) == 0:
             raise ValueError("Dataset images should be in jpg or png format")
         k = k[0]
@@ -45,6 +45,8 @@ def init_dataset(dataset_path, size=512):
 
         image_transforms = transforms.Compose(
             [
+                #transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR),
+                #transforms.CenterCrop(size),
                 transforms.RandomCrop(size, pad_if_needed=True, padding_mode="reflect"),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
@@ -69,7 +71,8 @@ def collate_fn(examples):
     imgs = [example["img"] for example in examples]
     imgs = torch.stack(imgs)
 
-    scale = random.uniform(1.0, 2.1)
+    scale = 1 / random.uniform(1.0, 2.1)
+    #scale = random.uniform(1.0, 2.1)
     size = [int(round(imgs.shape[-2] * scale)), int(round(imgs.shape[-1] * scale))]
     size[0] -= size[0] % 8
     size[1] -= size[1] % 8
@@ -95,31 +98,50 @@ def calculate_loss(
     vae,
     lpips,
     dtype=torch.float16,
-    mse_weight=1,
+    mse_weight=0,
+    mae_weight=1,
     lpips_weight=0.1,
-    mse_latent_weight=0.01,
+    mse_latent_weight=0,
 ):
+    logs = {}
     img_input = batch["img_input"].to(args.device, dtype=dtype)
     img_target = batch["img_target"].to(args.device, dtype=dtype)
+    taesd = isinstance(vae, AutoencoderTiny)
+    if taesd:
+        encode = lambda x: vae.unscale_latents(vae.encode(0.5*(x+1)).latents)
+        decode = lambda x: vae.decode(x / 8).sample
+    else:
+        encode = lambda x: vae.encode(x).latent_dist.sample()
+        decode = lambda x: vae.decode(x).sample
+
     latent_input = (
-        vae.config.scaling_factor * vae.encode(img_input).latent_dist.sample()
+        vae.config.scaling_factor * encode(img_input)
     )
-    latent_target = (
-        vae.config.scaling_factor * vae.encode(img_target).latent_dist.sample()
-    )
-    size = latent_target.shape[-2:]
+
+    size = (img_target.shape[-2] // 8, img_target.shape[-1] // 8)
+    assert size[0] >= latent_input.shape[-2]
     with torch.autocast(args.device, dtype=dtype, enabled=dtype != torch.float32):
         resized = model(latent_input, size=size)
-    mse_latent = F.mse_loss(resized, latent_target)
-    logs = {"mse_latent": mse_latent.detach().cpu().item()}
-    decoded = vae.decode(resized / vae.config.scaling_factor)[0]
+    decoded = decode(resized / vae.config.scaling_factor)
+
     mse = F.mse_loss(decoded, img_target)
-    logs["mse"] = mse
-    loss = mse_weight * mse + mse_latent_weight * mse_latent
+    logs["mse"] = mse.detach().cpu().item()
+    mae = F.l1_loss(decoded, img_target)
+    logs["mae"] = mae.detach().cpu().item()
+
+    loss = mse_weight * mse + mae_weight * mae
+
+    if mse_latent_weight > 0:
+        latent_target = vae.config.scaling_factor * encode(img_target)
+        mse_latent = F.mse_loss(resized, latent_target)
+        logs["mse_latent"] = mse_latent.detach().cpu().item()
+        loss = loss + mse_latent_weight * mse_latent
+
     if lpips_weight > 0:
-        ploss = lpips(decoded, img_target).mean()
+        ploss = lpips(decoded.float(), img_target.float()).mean()
         logs["lpips"] = ploss.detach().cpu().item()
         loss = loss + lpips_weight * ploss
+
     logs["loss"] = loss.detach().cpu().item()
     return loss, logs
 
@@ -236,6 +258,53 @@ if __name__ == "__main__":
         action="store_true",
         help="Enable gradient checkpointing for VAE",
     )
+    parser.add_argument(
+        "--gradient_accumulation",
+        type=int,
+        default=1,
+        required=False,
+        help="Gradient accumulation batches",
+    )
+    parser.add_argument(
+        "--start_step",
+        type=int,
+        default=0,
+        required=False,
+        help="Starting step",
+    )
+    parser.add_argument(
+        "--mse_weight",
+        type=float,
+        default=0,
+        required=False,
+        help="MSE weight (L2 loss)",
+    )
+    parser.add_argument(
+        "--mae_weight",
+        type=float,
+        default=1,
+        required=False,
+        help="MAE weight (L1 loss)",
+    )
+    parser.add_argument(
+        "--lpips_weight",
+        type=float,
+        default=0.25,
+        required=False,
+        help="LPIPS weight",
+    )
+    parser.add_argument(
+        "--mse_latent_weight",
+        type=float,
+        default=0,
+        required=False,
+        help="MSE latent weight (slows training)",
+    )
+    parser.add_argument(
+        "--taesd",
+        action="store_true",
+        help="Use TAESD VAE (faster)",
+    )
     args = parser.parse_args()
     device = torch.device(args.device)
 
@@ -243,14 +312,19 @@ if __name__ == "__main__":
     if args.fp16:
         vae_dtype = torch.float16
 
-    vae = AutoencoderKL.from_single_file(args.vae_path).to(device, dtype=vae_dtype)
+    if args.taesd:
+        #SDXL: sayakpaul/taesdxl-diffusers
+        #SD1.x: sayakpaul/taesd-diffusers
+        vae = AutoencoderTiny.from_pretrained(args.vae_path).to(device, dtype=vae_dtype)
+    else:
+        vae = AutoencoderKL.from_single_file(args.vae_path).to(device, dtype=vae_dtype)
     # Use this scale even with SD 1.5
     vae.config.scaling_factor = 0.13025
 
     vae.train()
     if args.gradient_checkpointing:
         vae.enable_gradient_checkpointing()
-    lpips_fn = lpips.LPIPS(net="vgg").to(device=device, dtype=vae_dtype)
+    lpips_fn = lpips.LPIPS(net="vgg").to(device=device, dtype=torch.float32)
 
     if args.init_weights:
         model = LatentResizer.load_model(
@@ -294,10 +368,14 @@ if __name__ == "__main__":
     writer = SummaryWriter(comment="resizer")
     model.train()
     epoch = 0
-    step = 0
+    for i in range(args.start_step):
+        scheduler.step()
+    step = args.start_step
     progress_bar = tqdm(range(args.steps))
     progress_bar.set_description("Steps")
-    train_fn = lambda batch: calculate_loss(model, batch, vae, lpips_fn, vae_dtype)
+    train_fn = lambda batch: calculate_loss(model, batch, vae, lpips_fn, vae_dtype, mse_weight=args.mse_weight, mae_weight=args.mae_weight, lpips_weight=args.lpips_weight, mse_latent_weight=args.mse_latent_weight)
+    if step > 0:
+        progress_bar.update(step)
 
     while step < args.steps:
         epoch += 1
@@ -320,9 +398,10 @@ if __name__ == "__main__":
                 print("norm", total_norm)
             if args.grad_clip > 0:
                 nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
-            scaler.step(optimizer)
-            optimizer.zero_grad()
-            scaler.update()
+            if (step + 1) % args.gradient_accumulation == 0:
+                scaler.step(optimizer)
+                optimizer.zero_grad()
+                scaler.update()
             progress_bar.update(1)
             scheduler.step()
             if step >= args.steps:

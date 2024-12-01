@@ -10,23 +10,28 @@ class NNLatentUpscale:
     """
 
     def __init__(self):
-        self.local_dir = os.path.dirname(os.path.realpath(__file__))
         self.scale_factor = 0.13025
         self.dtype = torch.float32
         if model_management.should_use_fp16():
             self.dtype = torch.float16
-        self.weight_path = {
-            "SDXL": os.path.join(self.local_dir, "sdxl_resizer.pt"),
-            "SD 1.x": os.path.join(self.local_dir, "sd15_resizer.pt"),
-        }
-        self.version = "none"
+        self.model_name = None
+
+    @staticmethod
+    def model_list():
+        local_dir = os.path.dirname(os.path.realpath(__file__))
+        model_dir = os.path.join(local_dir, "models")
+        models = []
+        for file in os.listdir(model_dir):
+            if file.endswith(".pt"):
+                models.append(file)
+        return models
 
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
                 "latent": ("LATENT",),
-                "version": (["SDXL", "SD 1.x"],),
+                "model": (NNLatentUpscale.model_list(),),
                 "upscale": (
                     "FLOAT",
                     {
@@ -46,15 +51,17 @@ class NNLatentUpscale:
 
     CATEGORY = "latent"
 
-    def upscale(self, latent, version, upscale):
+    def upscale(self, latent, model, upscale):
         device = model_management.get_torch_device()
         samples = latent["samples"].to(device=device, dtype=self.dtype)
 
-        if version != self.version:
+        if model != self.model_name:
+            self.model_name = model
+            model_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "models")
+            model_path = os.path.join(model_dir, model)
             self.model = LatentResizer.load_model(
-                self.weight_path[version], device, self.dtype
+                model_path, device, self.dtype
             )
-            self.version = version
 
         self.model.to(device=device)
         latent_out = (

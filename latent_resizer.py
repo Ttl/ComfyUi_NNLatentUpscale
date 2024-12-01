@@ -4,7 +4,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
-
 def normalization(channels):
     return nn.GroupNorm(32, channels)
 
@@ -178,10 +177,13 @@ class LatentResizer(nn.Module):
 
     @classmethod
     def load_model(cls, filename, device="cpu", dtype=torch.float32, dropout=0):
-        if not 'weights_only' in torch.load.__code__.co_varnames:
+        if not "weights_only" in torch.load.__code__.co_varnames:
             weights = torch.load(filename, map_location=torch.device("cpu"))
         else:
-            weights = torch.load(filename, map_location=torch.device("cpu"), weights_only=True)
+            weights = torch.load(
+                filename, map_location=torch.device("cpu"), weights_only=True
+            )
+
         in_blocks = 0
         out_blocks = 0
         in_tfs = 0
@@ -236,6 +238,7 @@ class LatentResizer(nn.Module):
                 x = b(x, emb)
             else:
                 x = b(x)
+
         x = F.interpolate(x, size=size, mode="bilinear")
         for b in self.out_blocks:
             if isinstance(b, ResBlockEmb):
@@ -247,3 +250,30 @@ class LatentResizer(nn.Module):
         x = F.silu(x)
         x = self.conv_out(x)
         return x
+
+
+class Discriminator(nn.Module):
+    def __init__(self, in_channels=3, channels=[64, 128, 256, 512]):
+        super().__init__()
+        ksize = 4
+        kstride = 2
+        pad = 1
+
+        #nonlinearity = nn.SiLU
+        #norm = normalization
+        nonlinearity = lambda : nn.LeakyReLU(0.2, inplace=True)
+        norm = nn.InstanceNorm2d
+
+        layers = [nn.Conv2d(in_channels, channels[0], kernel_size=ksize, stride=kstride, padding=pad),
+                  nonlinearity()]
+
+        for i in range(1, len(channels)):
+            layers += [nn.Conv2d(channels[i-1], channels[i], kernel_size=ksize, stride=kstride, padding=pad),
+                        norm(channels[i]),
+                        nonlinearity()]
+        layers += [nn.Conv2d(channels[-1], 1, kernel_size=ksize, stride=1, padding=pad)]
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.layers(x)
+
